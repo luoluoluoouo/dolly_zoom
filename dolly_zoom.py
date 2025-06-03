@@ -1,6 +1,7 @@
 import imageio
 import cv2
 import numpy as np
+import os
 
 from tqdm import tqdm
 
@@ -141,7 +142,10 @@ def main(
 
         combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
         frames.append(combined_rgb)
-
+    print("💾 儲存 GIF...")
+    # 確保輸出目錄存在
+    output_dir = os.path.dirname(output_gif_path)
+    os.makedirs(output_dir, exist_ok=True)
     print("💾 儲存 GIF...")
     imageio.mimsave(output_gif_path, frames, fps=10)
     print(f"✅ GIF 已儲存至：{output_gif_path}")
@@ -151,8 +155,8 @@ if __name__ == "__main__":
         left_path="images/left.jpg",
         right_path="images/right.jpg",
         output_gif_path="result/dolly_zoom.gif",
-        fg_strength_range=(0.0, 0.3),
-        bg_strength_range=(0.0, 0.5),
+        fg_strength_range=(0.0, 0.2),
+        bg_strength_range=(0.0, 0.3),
         steps=15,
         num_disparities=16 * 11,
         block_size=11,

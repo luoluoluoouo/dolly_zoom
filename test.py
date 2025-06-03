@@ -1,5 +1,37 @@
+import imageio
 import cv2
 import numpy as np
+import os
+
+from tqdm import tqdm
+
+def recut(img, strength=0.5):
+    h, w = img.shape[:2]
+    center_x, center_y = w / 2, h / 2
+
+    # 計算縮小後的尺寸
+    shrink_h = int(h * (1 - strength))
+    shrink_w = int(w * (1 - strength))
+
+    # 計算裁剪區域的起始位置
+    start_x = (w - shrink_w) // 2
+    start_y = (h - shrink_h) // 2
+
+    # 裁剪圖片
+    cropped = img[start_y:start_y + shrink_h, start_x:start_x + shrink_w]
+
+    # 放大裁剪後的圖片至原圖大小
+    distorted = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return distorted
+
+
+import imageio
+import cv2
+import numpy as np
+import os
+
+from tqdm import tqdm
 
 def center_zoom_distortion(img, strength=0.5):
     h, w = img.shape[:2]
@@ -70,26 +102,26 @@ def center_shrink_distortion(img, strength=0.5):
 def main(
     left_path: str,
     right_path: str,
-    output_prefix: str = "output",
-    num_disparities: int = 16 * 5,  # 必須是16的倍數
+    output_gif_path: str = "output.gif",
+    fg_strength_range=(0.0, 0.6),
+    bg_strength_range=(0.0, 0.3),
+    steps=20,
+    num_disparities: int = 16 * 5,
     block_size: int = 5,
     min_disparity: int = 0,
     disparity_threshold: int = 20,
-    kernel: np.ndarray = np.ones((3, 3), np.uint8),  # 形態學運算的核
-    invert_mask: bool = False  # 加入反轉遮罩的選項
-):
-    # 讀取左右影像（BGR格式）
+    kernel: np.ndarray = np.ones((3, 3), np.uint8),
+    invert_mask: bool = False
+    ):
     left_bgr = cv2.imread(left_path, cv2.IMREAD_COLOR)
     right_bgr = cv2.imread(right_path, cv2.IMREAD_COLOR)
     if left_bgr is None or right_bgr is None:
-        print("無法讀取影像，請確認路徑正確。")
+        print("❌ 無法讀取影像，請確認路徑正確。")
         return
 
-    # 轉灰階並進行高斯模糊以減少雜訊
     left_gray = cv2.GaussianBlur(cv2.cvtColor(left_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
     right_gray = cv2.GaussianBlur(cv2.cvtColor(right_bgr, cv2.COLOR_BGR2GRAY), (5, 5), 0)
 
-    # 使用 StereoSGBM 計算視差
     stereo = cv2.StereoSGBM_create(
         minDisparity=min_disparity,
         numDisparities=num_disparities,
@@ -103,68 +135,65 @@ def main(
     )
     disparity_raw = stereo.compute(left_gray, right_gray).astype(np.float32) / 16.0
     disparity_raw[disparity_raw < 0] = 0
+    disparity_norm = cv2.normalize(disparity_raw, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
 
-    # 將視差正規化至 0~255，便於觀察與後續處理
-    disparity_norm = cv2.normalize(disparity_raw, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    disparity_norm = disparity_norm.astype(np.uint8)
-
-    # 建立遮罩：根據設定的閾值來區分前景與背景
     mask = disparity_norm > disparity_threshold
     if invert_mask:
         mask = np.logical_not(mask)
-
-    # 進行形態學閉運算以平滑遮罩，避免小區域雜訊
     mask_morph = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    # 根據遮罩保留前景，將背景塗黑
-    foreground = left_bgr.copy()
-    foreground[mask_morph == 0] = [0, 0, 0]
+    frames = []
 
-    # 將前景取出後進行中心放大失真
-    foreground = center_zoom_distortion(foreground, strength=0.5)
-    background = center_shrink_distortion(left_bgr, strength=0.5)
+    fg_strengths = np.concatenate([
+        np.linspace(fg_strength_range[0], fg_strength_range[1], steps),
+        np.linspace(fg_strength_range[1], fg_strength_range[0], steps)
+    ])
+    bg_strengths = np.concatenate([
+        np.linspace(bg_strength_range[0], bg_strength_range[1], steps),
+        np.linspace(bg_strength_range[1], bg_strength_range[0], steps)
+    ])
 
-    # 轉成灰階並建立遮罩
-    gray_fg = cv2.cvtColor(foreground, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray_fg, 10, 255, cv2.THRESH_BINARY)
+    print("📸 開始產生動畫幀...")
+    for fg_strength, bg_strength in tqdm(zip(fg_strengths, bg_strengths), total=len(fg_strengths)):
+        fg = left_bgr.copy()
+        fg[mask_morph == 0] = [0, 0, 0]
+        foreground = center_zoom_distortion(fg, strength=fg_strength)
+        foreground = recut(foreground, strength= 0.3)
+        background = center_shrink_distortion(left_bgr, strength=bg_strength)
+        background = recut(background, strength=0.3)
 
-    # 建立反向遮罩
-    mask_inv = cv2.bitwise_not(mask)
+        gray_fg = cv2.cvtColor(foreground, cv2.COLOR_BGR2GRAY)
+        _, mask_bin = cv2.threshold(gray_fg, 10, 255, cv2.THRESH_BINARY)
+        mask_inv = cv2.bitwise_not(mask_bin)
 
-    # 從背景中扣除要貼的區域
-    bg_part = cv2.bitwise_and(background, background, mask=mask_inv)
+        bg_part = cv2.bitwise_and(background, background, mask=mask_inv)
+        fg_part = cv2.bitwise_and(foreground, foreground, mask=mask_bin)
+        combined = cv2.add(bg_part, fg_part)
 
-    # 從前景圖取出要貼上的區域
-    fg_part = cv2.bitwise_and(foreground, foreground, mask=mask)
-
-    # 合併
-    combined = cv2.add(bg_part, fg_part)
-
-
-    # 顯示結果
-    # cv2.imshow("Left Image", left_bgr)
-    # cv2.imshow("Right Image", right_bgr)
-    # cv2.imshow("Disparity", disparity_norm)
-    # cv2.imshow("Mask", mask_morph * 255)
-    # cv2.imshow("Foreground", foreground)
-    # cv2.imshow("Background", background)
-    cv2.imshow("Combined", combined)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+        frames.append(combined_rgb)
+    print("💾 儲存 GIF...")
+    # 確保輸出目錄存在
+    output_dir = os.path.dirname(output_gif_path)
+    os.makedirs(output_dir, exist_ok=True)
+    print("💾 儲存 GIF...")
+    imageio.mimsave(output_gif_path, frames, fps=10)
+    print(f"✅ GIF 已儲存至：{output_gif_path}")
 
 if __name__ == "__main__":
-    num_disparities = 16 * 11
-    block_size = 11
-
     main(
-        left_path = "images/left.jpg",
-        right_path = "images/right.jpg",
-        output_prefix="result",
-        num_disparities=num_disparities,
-        block_size=block_size,
-        min_disparity=0,
+        left_path="images/left.jpg",
+        right_path="images/right.jpg",
+        output_gif_path="result/dolly_zoom.gif",
+        fg_strength_range=(0.0, 0.1),
+        bg_strength_range=(0.0, 0.3),
+        steps=15,
+        num_disparities=16 * 11,
+        block_size=11,
         disparity_threshold=35,
         invert_mask=False,
-        kernel = np.ones((5, 5), np.uint8)
+        kernel=np.ones((5, 5), np.uint8)
     )
-    print(f"num_disparities: 16 * {int(num_disparities/16)}, block_size: {block_size}")
+
+
+
