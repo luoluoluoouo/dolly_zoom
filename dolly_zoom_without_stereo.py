@@ -181,6 +181,10 @@ def main(
 
         # 6. 轉成 RGB，放進 frames
         combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+
+        # 7. 高斯濾波去除雜訊（可選）
+        combined_rgb = cv2.GaussianBlur(combined_rgb, (11, 11), 0)
+
         frames.append(combined_rgb)
 
     # 確保輸出資料夾存在
