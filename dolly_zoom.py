@@ -5,6 +5,26 @@ import os
 
 from tqdm import tqdm
 
+def recut(img, strength=0.5):
+    h, w = img.shape[:2]
+    center_x, center_y = w / 2, h / 2
+
+    # 計算縮小後的尺寸
+    shrink_h = int(h * (1 - strength))
+    shrink_w = int(w * (1 - strength))
+
+    # 計算裁剪區域的起始位置
+    start_x = (w - shrink_w) // 2
+    start_y = (h - shrink_h) // 2
+
+    # 裁剪圖片
+    cropped = img[start_y:start_y + shrink_h, start_x:start_x + shrink_w]
+
+    # 放大裁剪後的圖片至原圖大小
+    distorted = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return distorted
+
 def center_zoom_distortion(img, strength=0.5):
     h, w = img.shape[:2]
     center_x, center_y = w / 2, h / 2
@@ -130,7 +150,9 @@ def main(
         fg = left_bgr.copy()
         fg[mask_morph == 0] = [0, 0, 0]
         foreground = center_zoom_distortion(fg, strength=fg_strength)
+        foreground = recut(foreground, strength= 0.3)
         background = center_shrink_distortion(left_bgr, strength=bg_strength)
+        background = recut(background, strength=0.3)
 
         gray_fg = cv2.cvtColor(foreground, cv2.COLOR_BGR2GRAY)
         _, mask_bin = cv2.threshold(gray_fg, 10, 255, cv2.THRESH_BINARY)
@@ -155,13 +177,12 @@ if __name__ == "__main__":
         left_path="images/left.jpg",
         right_path="images/right.jpg",
         output_gif_path="result/dolly_zoom.gif",
-        fg_strength_range=(0.0, 0.2),
+        fg_strength_range=(0.0, 0.1),
         bg_strength_range=(0.0, 0.3),
-        steps=15,
+        steps= 100,
         num_disparities=16 * 11,
         block_size=11,
         disparity_threshold=35,
         invert_mask=False,
         kernel=np.ones((5, 5), np.uint8)
     )
-
