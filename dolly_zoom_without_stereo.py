@@ -183,7 +183,7 @@ def main(
         combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
 
         # 7. 高斯濾波去除雜訊（可選）
-        combined_rgb = cv2.GaussianBlur(combined_rgb, (11, 11), 0)
+        # combined_rgb = cv2.GaussianBlur(combined_rgb, (11, 11), 0)
 
         frames.append(combined_rgb)
 
@@ -204,8 +204,8 @@ if __name__ == "__main__":
         color_path="images/color.jpg",
         depth_path="images/depth.jpg",
         output_gif_path="result/dolly_zoom.gif",
-        fg_strength_range=(0.0, 0.2),
-        bg_strength_range=(0.0, 0.2),
+        fg_strength_range=(0.0, 0.15),
+        bg_strength_range=(0.0, 0.4),
         steps=40,
         disparity_threshold=170,
         invert_mask=False,
